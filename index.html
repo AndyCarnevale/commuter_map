@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<meta http-equiv="Content-type" content="text/html; charset=UTF-8">
+<style>
+
+path {
+  stroke-linejoin: round;
+  stroke-width: 0.5;
+}
+
+body {
+  margin: 0;
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 14px;
+}
+
+.tooltip {
+  background: #eee;
+  opacity: 0.75;
+  padding: 2.5px;
+  position: absolute;
+  pointer-events: none;
+  white-space: pre;
+}
+
+.svgBackground {
+  fill: none;
+  pointer-events: all;
+}
+
+.states{
+  pointer-events: none;
+}
+
+.counties{
+  pointer-events: visible;
+  stroke: white;
+}
+
+
+</style>
+<svg width="960" height="600"></svg>
+<script src="d3.v4.min.js"></script>
+<script src="d3-scale-chromatic.v1.min.js"></script>
+<script src="topojson.v1.min.js"></script>
+<div class="tooltip"></div>
+<script>
+
+/*var selCountyID = 0;*/
+
+var svg = d3.select("svg");
+width = +svg.attr("width"),
+height = +svg.attr("height");
+
+var zoom = d3.zoom()
+    .scaleExtent([1, 20]) //how much map can be zoomed in by
+    .translateExtent([[0, -0], [width, height]])
+    .on("zoom", zoomed);
+
+var svgBackground = svg.append('rect')
+    .attr('class', 'svgBackground')
+    .attr('width', width)
+    .attr('height', height)
+    ;
+
+var svgContainer = svg.append('g');
+
+svg.call(zoom);
+
+function zoomed() {
+  svgContainer.attr("transform", d3.event.transform);
+}
+
+var projection = d3.geoAlbersUsa()
+    .scale(1280)
+    .translate([width / 2, height / 2]);
+
+var path = d3.geoPath()
+    .projection(projection)
+    .pointRadius(1.5);
+
+var color = d3.scaleLog()
+    .domain([1, 1000000]) //slightly above max
+    .range(['#eee', 'midnightblue']);
+
+var tooltip = d3.select('.tooltip');
+
+var selectedCounties = [];
+var selectedCountyIds = [];
+
+d3.queue()
+    .defer(d3.json, "us.json")
+    .defer(d3.csv, "CommuteData.csv")
+    .await(ready);
+
+function ready(error, us, commute) {
+  if (error) throw error;
+
+  svgContainer.append("path")
+    .datum(topojson.feature(us, us.objects.land))
+    .attr("class", "land")
+    .attr("d", path)
+    .attr('fill', '#ddd')
+  ;
+
+  gCounty = svgContainer.append('g').attr('class', 'counties');
+  selCounty = gCounty.selectAll('.county')
+    .data(topojson.feature(us, us.objects.counties).features)
+    .enter()
+    .append('path')
+      .attr('d', path)
+      .attr('class', 'county')
+      .attr('fill', 'none')
+      .attr('id', function(d){return 'INCITS' + d.id;}) 
+      .on("mouseover", function(d) {
+        tooltip.text(function(D){
+         var text = //'id: ' + d.id + '\n' +
+            resInfo(d.id)[0].Res_County + ', ' 
+            + resInfo(d.id)[0].Res_State 
+            + '\nPopulation: ' + (+resInfo(d.id)[0].Res_2013Pop).toLocaleString();
+          if (selectedCountyIds.includes(d.id))
+            text = text 
+              + '\nCommute to: ' + (+getInfoFromWorkCounty(d.id).Flow).toLocaleString()
+              + ' ± ' + (+getInfoFromWorkCounty(d.id).FlowMarginOfError).toLocaleString();
+          else
+            text = text + '\nCommuters: none recorded';
+          return text;
+        ;})
+        .style('visibility', 'visible')
+        .style('left', d3.event.pageX + 'px')
+        .style('top', d3.event.pageY + 'px')
+        ;
+      })
+      .on('mouseout', function(d) {
+        tooltip.style('visibility', 'hidden');
+      })
+      .on('click', function(d) {
+        selCountyID = d.id;
+        getWorkCounties(selCountyID);
+        d3.select(this)
+          .attr('fill', 'orange')
+          .attr('fill-opacity', 1.0);
+      })
+
+  ;
+
+  function resInfo(id){
+    return commute.filter(function(d){return d.Res_INCITS == id;});
+  }
+
+  function getInfoFromWorkCounty(id){
+    return selectedCounties.filter(function(a){return +a.Work_INCITS == id;})[0];
+  }
+
+  
+
+  function getWorkCounties(resId){
+    //Reset old map
+    selectedCounties.map(function(d){
+      d3.selectAll('#INCITS' + d.Work_INCITS)
+        .attr('fill-opacity', 0.0)
+    })
+    selectedCounties = [];
+    selectedCountyIds = [];
+    
+    //Set new map
+    resInfo(resId).map(function(d){
+      selectedCounties.push(d);
+      selectedCountyIds.push(+d.Work_INCITS);
+      if (resId != d.Work_INCITS)      
+        d3.select('#INCITS' + d.Work_INCITS)
+          //.attr('fill', 'blue')
+          .attr('fill', color(d.Flow))
+          .attr('fill-opacity', 1.0) 
+        ;
+    })
+  }
+
+  svgContainer.append("path")
+    .datum(topojson.mesh(us, us.objects.states, function(a, b) { return a !== b; }))
+    .attr("class", "states")
+    .attr("d", path)
+    .attr('fill', 'none')
+    .attr('stroke', 'black')
+  ;
+
+}
+
+</script>
